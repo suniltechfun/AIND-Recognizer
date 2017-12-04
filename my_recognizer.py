@@ -18,6 +18,7 @@ def recognize(models: dict, test_set: SinglesData):
            ['WORDGUESS0', 'WORDGUESS1', 'WORDGUESS2',...]
    """
     warnings.filterwarnings("ignore", category=DeprecationWarning)
+    
     probabilities = []
     guesses = []
     for X, lengths in test_set.get_all_Xlengths().values():
