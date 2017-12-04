@@ -75,10 +75,30 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
-
+        
+        best_score, best_n_components = None, None
+        min_bic = float('inf')
+        best_model = None
+        for n_components in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                # Bayesian information criteria: BIC = -2 * logL + p * logN
+                # L is the likelihood of the fitted model
+                # p is the number of parameters
+                # N is the number of data points
+                model = self.base_model(n_components)
+                logL = model.score(self.X, self.lengths)
+                logN = np.log(len(self.X))
+                N = sum(self.lengths)
+                n_features = self.X.shape[1]
+                p = n_components * (n_components-1) + 2 * n_features * n_components
+                # calculate BIC score
+                bic = -2 * logL + p * logN
+                if bic < min_bic:
+                    min_bic = bic
+                    best_model = model
+            except Exception as e:
+                continue
+        return best_model if best_model else self.base_model(self.n_constant)
 
 class SelectorDIC(ModelSelector):
     ''' select best model based on Discriminative Information Criterion
@@ -90,11 +110,37 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    # Calculate anti log likelihoods.
+    def calc_logL_other_words(self, model, other_words):
+        return [model[1].score(word[0], word[1]) for word in other_words]
+
+    def calc_best_dic_score(self, score_dics):
+        # Max of list of lists comparing each item by value at index 0
+        return max(score_dics, key=lambda x: x[0])
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        other_words = []
+        models = []
+        dic_scores = []
+
+        for word in self.words:
+            if word != self.this_word:
+                other_words.append(self.hwords[word])
+
+        for n_components in range(self.min_n_components, self.max_n_components + 1):
+            try:
+                model = self.base_model(n_components)
+                logL = model.score(self.X, self.lengths)
+                models.append((logL, model))
+            except Exception as e:
+                pass
+        for i, model in enumerate(models):
+            logL_original_word, hmm_model = model
+            score_dic = logL_original_word - np.mean(self.calc_logL_other_words(model, other_words))
+            dic_scores.append(tuple([score_dic, model[1]]))
+        return self.calc_best_dic_score(dic_scores)[1] if dic_scores else None
 
 
 class SelectorCV(ModelSelector):
@@ -102,8 +148,32 @@ class SelectorCV(ModelSelector):
 
     '''
 
+    ''' def calc_best_score_cv(self, score_cv):
+        # Max of list of lists comparing each item by value at index 0
+        return max(score_cv, key=lambda x: x[0])'''
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        mean_scores = []
+        # Save reference to 'KFold' in variable as shown in notebook
+        split_method = KFold()
+        try:
+            for n_component in range(self.min_n_components, self.max_n_components + 1):
+                model = self.base_model(n_component)
+                # Fold and calculate model mean scores
+                fold_scores = []
+                for _, test_idx in split_method.split(self.sequences):
+                    # Get test sequences
+                    test_X, test_length = combine_sequences(test_idx, self.sequences)
+                    # Record each model score
+                    fold_scores.append(model.score(test_X, test_length))
+
+                # Compute mean of all fold scores
+                mean_scores.append(np.mean(fold_scores))
+        except Exception as e:
+            pass
+
+        num_components = range(self.min_n_components, self.max_n_components + 1)
+        states = num_components[np.argmax(mean_scores)] if mean_scores else self.n_constant
+        return self.base_model(states)
